@@ -1,0 +1,5 @@
+bbox: [-33.4315, -70.6285, -33.4180, -70.6070]  # [south, west, north, east]
+highway_regex: "^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|pedestrian|track|path|footway|cycleway)$"
+timeout_s: 120
+overpass_url: "https://z.overpass-api.de/api/interpreter"
+user_agent: "fase2-providencia-etl/sector/1.0"

@@ -1,0 +1,9 @@
+- type: FeatureCollection
+- crs: EPSG:4326
+- features[].geometry: Polygon (celda de grilla)
+- features[].properties:
+  - temp_c: float (temperatura °C actual desde Open-Meteo)
+  - row, col: índices de fila/columna en la grilla
+  - centroid.lon, centroid.lat: centro de la celda
+- properties.time: ISO-8601 de la medición
+- fuente: Open-Meteo (current_weather)

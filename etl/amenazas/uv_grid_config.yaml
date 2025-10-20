@@ -1,0 +1,16 @@
+# BBOX Providencia (S, W, N, E)
+bbox: [-33.4450, -70.6315, -33.4180, -70.5710]
+
+# Tamaño grilla
+cells_y: 8    # filas (N→S)
+cells_x: 12   # columnas (W→E)
+
+# OpenWeatherMap One Call 3.0
+api_base: "https://api.openweathermap.org/data/3.0/onecall"
+api_key: "4d8303b04d56d671a3e0281d37bd5717"
+# Solo queremos el UV actual (en current.uvi)
+exclude: "minutely,hourly,daily,alerts"
+units: "metric"
+
+# Pausa entre requests (seg) para no saturar la API
+sleep_s: 0.2

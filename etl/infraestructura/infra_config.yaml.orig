@@ -1,0 +1,5 @@
+area_name: "Providencia"
+highway_regex: "^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|pedestrian|track|path|footway|cycleway)$"
+timeout_s: 180
+overpass_url: "https://overpass-api.de/api/interpreter"
+user_agent: "fase2-providencia-etl/infra/1.0"

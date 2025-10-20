@@ -1,0 +1,9 @@
+- type: FeatureCollection
+- crs: EPSG:4326
+- features[].geometry: Polygon (huella del edificio)
+- features[].properties:
+  - osm_id: bigint
+  - height_m: float (altura estimada, m)
+  - levels: string|null (si viene de OSM)
+  - height_tag: string|null (si viene de OSM)
+  - building: string|null (tipo)

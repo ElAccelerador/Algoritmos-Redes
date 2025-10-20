@@ -1,0 +1,8 @@
+- type: FeatureCollection
+- crs: EPSG:4326
+- geometry: Point
+- properties:
+  - fuente: 'pdf_providencia'
+  - attrs.area_px: entero (área del blob en píxeles)
+  - attrs.bbox_px: [y0,x0,y1,x1] del blob en píxeles
+- origen: extracción automática desde PDF georreferenciado por BBOX del área de trabajo

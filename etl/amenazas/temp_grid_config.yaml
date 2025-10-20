@@ -1,0 +1,10 @@
+# BBOX Providencia (S, W, N, E) — mismo marco que usas para infraestructura
+bbox: [-33.4450, -70.6315, -33.4180, -70.5710]
+# Tamaño de la grilla (celdas)
+cells_y: 8    # filas (N-S)
+cells_x: 12   # columnas (W-E)
+# Open-Meteo: temperatura actual por celda (centroide)
+api_base: "https://api.open-meteo.com/v1/forecast"
+query: "current_weather=true"   # usa la temperatura actual
+# Pausa entre requests (segundos) para ser amable con la API
+sleep_s: 0.15

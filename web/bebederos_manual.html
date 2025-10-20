@@ -1,0 +1,130 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Bebederos – Editor Manual</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    html,body,#map{height:100%;margin:0}
+    .panel{position:absolute;z-index:1000;top:10px;left:10px;background:#fff;padding:8px 10px;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.15);font:14px system-ui,Segoe UI,Roboto,Arial}
+    .panel label{display:block;margin-bottom:6px;cursor:pointer}
+    .panel .row{margin-bottom:6px}
+    .panel input[type="text"]{width:160px}
+    .count{font-size:12px;color:#555;margin-top:4px}
+    .btn{cursor:pointer;border:1px solid #999;padding:4px 8px;border-radius:4px;background:#f5f5f5}
+    .btn:active{transform:translateY(1px)}
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="panel">
+    <label><input id="chk-infra" type="checkbox" checked> Ver infraestructura</label>
+    <div class="row">
+      Fuente: <input id="txt-fuente" type="text" value="manual_click">
+    </div>
+    <div class="row">
+      <button id="btn-undo" class="btn">Deshacer último</button>
+      <button id="btn-clear" class="btn">Limpiar todos</button>
+    </div>
+    <div class="row">
+      <input id="file-import" type="file" accept=".geojson,.json">
+      <button id="btn-export" class="btn">Exportar GeoJSON</button>
+    </div>
+    <div class="count" id="lbl-count">0 puntos</div>
+    <div class="count">Click en el mapa para agregar un bebedero</div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([-33.431,-70.618], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19, attribution:'© OSM'}).addTo(map);
+
+    // Infraestructura existente
+    const infra = L.layerGroup().addTo(map);
+    Promise.all([
+      fetch('../json/infra_provi_sector.geojson').then(r=>r.json()).catch(()=>null),
+      fetch('../json/infra_provi_sector_south_exp.geojson').then(r=>r.json()).catch(()=>null),
+      fetch('../json/infra_provi_sector_east.geojson').then(r=>r.json()).catch(()=>null),
+    ]).then(gs=>{
+      gs.filter(Boolean).forEach(g=>infra.addLayer(L.geoJSON(g,{style:()=>({weight:2})})));
+      try{ map.fitBounds(infra.getBounds()); }catch(_){}
+    });
+
+    document.getElementById('chk-infra').addEventListener('change', e=>{
+      e.target.checked ? infra.addTo(map) : map.removeLayer(infra);
+    });
+
+    // Capa editable de bebederos (click -> agrega punto)
+    const pts = [];
+    const layerPts = L.layerGroup().addTo(map);
+    const fuenteEl = document.getElementById('txt-fuente');
+    const lblCount = document.getElementById('lbl-count');
+
+    function redraw(){
+      layerPts.clearLayers();
+      pts.forEach((f,i)=>{
+        const m=L.circleMarker([f.geometry.coordinates[1], f.geometry.coordinates[0]], {radius:5});
+        m.bindTooltip(`#${i+1}  ${f.geometry.coordinates[1].toFixed(6)}, ${f.geometry.coordinates[0].toFixed(6)}`);
+        m.on('click', ()=>{ // click en marcador -> eliminar ese punto
+          pts.splice(i,1); redraw();
+        });
+        layerPts.addLayer(m);
+      });
+      lblCount.textContent = `${pts.length} punto${pts.length===1?'':'s'}`;
+    }
+
+    map.on('click', (e)=>{
+      const lon = e.latlng.lng, lat = e.latlng.lat;
+      const fuente = fuenteEl.value || 'manual_click';
+      pts.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [lon, lat] },
+        properties: { fuente, attrs: {} }
+      });
+      redraw();
+    });
+
+    document.getElementById('btn-undo').addEventListener('click', ()=>{
+      pts.pop(); redraw();
+    });
+
+    document.getElementById('btn-clear').addEventListener('click', ()=>{
+      if(!confirm('Borrar todos los puntos?')) return;
+      pts.length = 0; redraw();
+    });
+
+    // Importar un GeoJSON existente para seguir editando
+    document.getElementById('file-import').addEventListener('change', async (ev)=>{
+      const f = ev.target.files[0]; if(!f) return;
+      const text = await f.text();
+      const gj = JSON.parse(text);
+      pts.length = 0;
+      (gj.features||[]).forEach(feat=>{
+        if(feat.geometry && feat.geometry.type==='Point'){
+          pts.push({
+            type:'Feature',
+            geometry:{type:'Point', coordinates:[+feat.geometry.coordinates[0], +feat.geometry.coordinates[1]]},
+            properties:{fuente:(feat.properties&&feat.properties.fuente)||'import', attrs:(feat.properties&&feat.properties.attrs)||{}}
+          });
+        }
+      });
+      redraw();
+      if(pts.length){
+        const latlngs = pts.map(p=>[p.geometry.coordinates[1], p.geometry.coordinates[0]]);
+        try{ map.fitBounds(L.latLngBounds(latlngs)); }catch(_){}
+      }
+      ev.target.value = '';
+    });
+
+    // Exportar a GeoJSON (descarga en el navegador)
+    document.getElementById('btn-export').addEventListener('click', ()=>{
+      const gj = { type:'FeatureCollection', crs:{type:'name',properties:{name:'EPSG:4326'}}, features: pts };
+      const blob = new Blob([JSON.stringify(gj)], {type:'application/geo+json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'metadata_bebederos.geojson';
+      document.body.appendChild(a); a.click(); a.remove();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+.venv
+venv
+__pycache__
+*.py[cod]
+.git
+.gitignore
+*.zip
+*.7z
+*.rar
+tmp/
+cache/
+data/
+qgis/
+json/
+web/node_modules/

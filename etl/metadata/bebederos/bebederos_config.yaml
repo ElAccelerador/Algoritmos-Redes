@@ -1,0 +1,9 @@
+bbox: [-33.4450, -70.6315, -33.4180, -70.5710]   # área total (S,W,N,E)
+pdf_path: "data/mapa_bebederos_providencia_top.pdf"
+page_index: 0
+dpi: 200
+color_ranges:
+  - {min: [0, 120, 170], max: [80, 210, 255]}
+  - {min: [0, 80, 140],  max: [60, 170, 230]}
+min_area_px: 10
+dilate_px: 1

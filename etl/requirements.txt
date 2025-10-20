@@ -1,0 +1,7 @@
+requests
+pyyaml
+shapely
+pyproj
+astral>=2,<4
+Pillow
+scikit-image

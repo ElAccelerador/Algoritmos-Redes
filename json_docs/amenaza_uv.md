@@ -1,0 +1,10 @@
+- type: FeatureCollection
+- crs: EPSG:4326
+- features[].geometry: Polygon (celda de grilla)
+- features[].properties:
+  - uv_index: float (índice UV actual desde OpenWeather One Call 3.0)
+  - row, col: índices de celda
+  - centroid.lon, centroid.lat: centro de celda
+  - timestamp: UNIX UTC del muestreo
+- properties.time_unix: UNIX UTC del primer muestreo
+- fuente: OpenWeatherMap One Call 3.0

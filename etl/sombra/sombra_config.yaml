@@ -1,0 +1,21 @@
+# BBOX y centro aproximado (para cálculo solar)
+center_lat: -33.431
+center_lon: -70.618
+
+# Fecha/hora local de Santiago para validar (12:00)
+datetime_local: "2025-10-19 12:00:00"  # AAAA-MM-DD HH:MM:SS
+
+# EPSG métrico (UTM Zona 19S para Santiago)
+target_epsg: 32719
+
+# Entradas
+buildings_geojson: "json/metadata_edificios.geojson"
+infra_files:
+  - "json/infra_provi_sector.geojson"
+  - "json/infra_provi_sector_south.geojson"
+  - "json/infra_provi_sector_south_exp.geojson"
+  - "json/infra_provi_sector_east.geojson"
+
+# Salidas
+shadows_geojson: "json/sombra_poligonos.geojson"
+shaded_roads_geojson: "json/infra_sombreada.geojson"

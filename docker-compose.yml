@@ -1,0 +1,39 @@
+services:
+  db:
+    build: ./docker/db
+    container_name: fase2_db
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=gis
+    volumes:
+      - ./db/initdb:/docker-entrypoint-initdb.d:ro
+      - ./json:/data/json:ro
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U postgres -d gis"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    environment:
+      - DB_HOST=db
+      - DB_NAME=gis
+      - DB_USER=postgres
+      - DB_PASS=postgres
+    depends_on:
+      db:
+        condition: service_healthy
+    ports: ["8000:8000"]
+    command: uvicorn server:app --host 0.0.0.0 --port 8000
+
+  web:
+    image: nginx:alpine
+    depends_on: [app]
+    ports: ["8080:80"]
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+      - ./json:/usr/share/nginx/html/json:ro
