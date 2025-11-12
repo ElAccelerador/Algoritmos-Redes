@@ -257,13 +257,14 @@ SQL_ASTAR_VARS_TEMPLATE = """
         $SQL$)::TEXT,
         
         -- 2. Parámetros de A*
-        %s::BIGINT, %s::BIGINT, -- source_node, target_node
+        %s::BIGINT, -- start_vid
+        %s::BIGINT, -- end_vid
         directed := false,
         
-        -- CORRECCIÓN BUG 2: Eliminado 'heuristic := 3'
-        -- Esta firma de pgr_aStar (con end_x/end_y) usa la
-        -- heurística de distancia por defecto.
-        end_x := %s, end_y := %s -- x (float), y (float)
+        -- CORRECCIÓN FINAL: Cambiado epsilon de 0.0 a 1.0
+        heuristic := 3,
+        factor := 1.0,
+        epsilon := 1.0 
     ) AS rt
     JOIN via_arista v ON rt.edge = v.id
     ORDER BY rt.seq;
@@ -296,11 +297,10 @@ def get_route_astar_variables(
                     hora=sql.Literal(hora_actual)
                 )
                 
+                # CORRECCIÓN: Los parámetros ahora son solo source y target
                 params = (
                     source_node,
-                    target_node,
-                    target_x,
-                    target_y
+                    target_node
                 )
                 
                 cur.execute(formatted_sql, params)
