@@ -6,14 +6,17 @@ from datetime import datetime, timezone
 
 CFG = yaml.safe_load(Path("etl/amenazas/uv_grid_config.yaml").read_text())
 S,W,N,E = CFG["bbox"]
-# <-- MODIFICADO: Ya no leemos NY, NX.
 API     = CFG["api_base"]
 KEY     = CFG["api_key"]
-EXC     = CFG.get("exclude","minutely,daily,alerts") 
+# MODIFICADO: Nos aseguramos de NO excluir 'hourly'
+EXC     = "minutely,daily,alerts" 
 UNITS   = CFG.get("units","metric")
-SLEEP   = float(CFG.get("sleep_s",0.2)) # (Ya no se usa en bucle)
+SLEEP   = float(CFG.get("sleep_s",0.2))
 
-# <-- MODIFICADO: Eliminadas las funciones linspace() y make_grid()
+# --- RANGO DE HORAS A PROCESAR (06:00 a 20:00) ---
+HORA_MIN = 6
+HORA_MAX = 20
+# ------------------------------------------------
 
 def fetch_uv_hourly(lat, lon):
     params = {
@@ -27,7 +30,8 @@ def fetch_uv_hourly(lat, lon):
     r.raise_for_status()
     j = r.json()
     
-    hourly_data = j.get("hourly", [])
+    # MODIFICADO: Tomar solo las primeras 24 horas
+    hourly_data = j.get("hourly", [])[:24]
     results = []
     
     for entry in hourly_data:
@@ -37,7 +41,6 @@ def fetch_uv_hourly(lat, lon):
             continue
             
         try:
-            # Usamos la hora UTC para consistencia
             dt_obj = datetime.fromtimestamp(ts, timezone.utc) 
             hour = dt_obj.hour 
             results.append({"hora": hour, "uvi": uvi, "timestamp": ts})
@@ -51,15 +54,11 @@ def main():
     feats=[]
     meta_time_unix = None
 
-    # <-- MODIFICADO: Definimos un solo polígono para todo el BBOX
     full_bbox_poly = [[W,N],[E,N],[E,S],[W,S],[W,N]]
-    
-    # <-- MODIFICADO: Calculamos un solo punto central para la consulta
     lat_center = (S + N) / 2.0
     lon_center = (W + E) / 2.0
 
     try:
-        # <-- MODIFICADO: Hacemos UNA sola llamada a la API
         hourly_results, current_ts = fetch_uv_hourly(lat_center, lon_center)
         if meta_time_unix is None: meta_time_unix = current_ts
     except Exception as e:
@@ -67,18 +66,24 @@ def main():
         hourly_results = []
         sys.exit(1)
 
-    # <-- MODIFICADO: Bucle para crear un feature POR HORA
     for data_point in hourly_results:
+        # --- MODIFICADO: FILTRO DE HORA ---
+        hora = data_point["hora"]
+        if not (HORA_MIN <= hora <= HORA_MAX):
+            continue # Saltar esta hora (es de noche)
+        # ----------------------------------
+
         props = {
-            "uv_index": data_point["uvi"],
-            "hora": data_point["hora"], # La propiedad clave
-            "row": 0, "col": 0, # Valores simbólicos
+            # MODIFICADO: El script original guardaba "uv_index", 
+            # pero la BD y el server.py esperan "uvi".
+            "uvi": data_point["uvi"], 
+            "hora": data_point["hora"],
+            "row": 0, "col": 0,
             "centroid": {"lon": lon_center, "lat": lat_center},
             "timestamp": data_point["timestamp"]
         }
         feats.append({
             "type":"Feature",
-            # Usamos el polígono del BBOX completo
             "geometry":{"type":"Polygon","coordinates":[full_bbox_poly]},
             "properties": props
         })
@@ -90,8 +95,7 @@ def main():
         "properties":{"source":"openweather","generated_time_unix":meta_time_unix}
     }
     Path("json/amenaza_uv_grid.geojson").write_text(json.dumps(gj, ensure_ascii=False))
-    # <-- MODIFICADO
-    print(f"OK json/amenaza_uv_grid.geojson features={len(feats)} (1 por hora) time_unix={meta_time_unix}")
+    print(f"OK json/amenaza_uv_grid.geojson features={len(feats)} (1 por hora diurna) time_unix={meta_time_unix}")
 
 if __name__=="__main__":
     main()

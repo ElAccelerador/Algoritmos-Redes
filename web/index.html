@@ -49,9 +49,14 @@
       <div class="route-legend"><span style="background:#e63946"></span><i id="time-dist"></i></div>
     </div>
     <div class="row">
-      <label><input id="chk-route-vars" type="checkbox" checked> <b>Ruta Amenazas</b> (Fase 3)</label>
+      <label><input id="chk-route-vars" type="checkbox" checked> <b>Ruta Dijkstra</b> (Fase 3)</label>
       <div class="route-legend"><span style="background:#1d3557"></span><i id="time-vars"></i></div>
     </div>
+    <div class="row">
+      <label><input id="chk-route-astar" type="checkbox" checked> <b>Ruta A*</b> (Fase 3)</label>
+      <div class="route-legend"><span style="background:#008000"></span><i id="time-astar"></i></div>
+    </div>
+    
     <div class="row">
       <button id="btn-route-calc">Calcular Rutas</button>
       <button id="btn-route-reset" style="margin-left:.5rem;background:#777">Reset</button>
@@ -68,47 +73,42 @@
     const map = L.map('map').setView([-33.431,-70.618], 15);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OSM'}).addTo(map);
 
-    // --- Elementos del DOM
     const errorsEl   = document.getElementById('errors');
     const selHora    = document.getElementById('sel-hora');
     
-    // --- Capas de Metadata
+    // Capas de Metadata
     const infraLayer = L.layerGroup().addTo(map);
     const bebLayer   = L.layerGroup().addTo(map);
     const infraCountEl = document.getElementById('infra-count');
     const bebCountEl   = document.getElementById('beb-count');
 
-    // --- Capas de Amenazas (Dinámicas por hora)
+    // Capas de Amenazas (Dinámicas)
     const tempLayer        = L.layerGroup().addTo(map);
     const uvLayer          = L.layerGroup().addTo(map);
     const sombraPolysLayer = L.layerGroup().addTo(map);
-    const sombraRoadsLayer = L.layerGroup(); // No se muestra por defecto
     const legendTemp     = L.control({position:'bottomright'});
     const legendUV       = L.control({position:'bottomleft'});
     
-    // --- Capas de Rutas (Comparativas)
-    const routeLayerDist = L.layerGroup().addTo(map);
-    const routeLayerVars = L.layerGroup().addTo(map);
-    const routeMarkers   = L.layerGroup().addTo(map);
+    // Capas de Rutas
+    const routeLayerDist  = L.layerGroup().addTo(map);
+    const routeLayerVars  = L.layerGroup().addTo(map);
+    const routeLayerAstar = L.layerGroup().addTo(map); // <-- NUEVA CAPA
+    const routeMarkers    = L.layerGroup().addTo(map);
 
-    // --- Almacenes de Datos Globales (para filtrado por hora)
+    // Almacenes de Datos Globales
     let g_amenazaTemp = null;
     let g_amenazaUv   = null;
     let g_sombraPolys = null;
-    let g_sombraRoads = null;
 
-    // --- Estado de Ruteo
     let picks = [];
     const clickInfo = document.getElementById('click-info');
 
-    // --- Helper de Logging
     function logErr(msg){
       console.error(msg);
       const div=document.createElement('div'); div.textContent=msg;
       errorsEl.appendChild(div);
     }
     
-    // --- Helper de Fetch
     async function safeFetch(url, isJson=true){
       const u = url + (url.includes('?')?'&':'?') + 'v=' + Date.now();
       const r = await fetch(u);
@@ -118,190 +118,69 @@
     }
     
     // --- 2. LÓGICA DE CARGA DE CAPAS (METADATA) ---
-    // (Estas no cambian, son como en Fase 2)
+    // (Sin cambios, omitido por brevedad... asumo que está bien)
     async function loadInfra(){
-      infraLayer.clearLayers();
-      let total=0;
-      const urls=[
-        '/json/infra_provi_sector.geojson',
-        '/json/infra_provi_sector_south.geojson',
-        '/json/infra_provi_sector_south_exp.geojson',
-        '/json/infra_provi_sector_east.geojson'
-      ];
+      infraLayer.clearLayers(); let total=0;
+      const urls=['/json/infra_provi_sector.geojson','/json/infra_provi_sector_south.geojson','/json/infra_provi_sector_south_exp.geojson','/json/infra_provi_sector_east.geojson'];
       const added=[];
       for(const url of urls){
-        try{
-          const g = await safeFetch(url);
-          if(!g?.features?.length) continue;
-          total += g.features.length;
-          added.push(L.geoJSON(g,{style:()=>({weight:2, color: '#555'})}));
-        }catch(e){ logErr(e.message); }
+        try{ const g = await safeFetch(url); if(!g?.features?.length) continue; total += g.features.length; added.push(L.geoJSON(g,{style:()=>({weight:2, color: '#555'})})); }catch(e){ logErr(e.message); }
       }
-      added.forEach(l=>infraLayer.addLayer(l));
-      infraCountEl.textContent = total ? `${total} features` : '0';
-      if(document.getElementById('chk-infra').checked){
-        infraLayer.addTo(map);
-        try{ map.fitBounds(infraLayer.getBounds(),{padding:[20,20]}); }catch(_){}
-      }
+      added.forEach(l=>infraLayer.addLayer(l)); infraCountEl.textContent = total ? `${total} features` : '0';
+      if(document.getElementById('chk-infra').checked){ infraLayer.addTo(map); try{ map.fitBounds(infraLayer.getBounds(),{padding:[20,20]}); }catch(_){} }
     }
-
     async function loadBeb(){
       bebLayer.clearLayers();
-      try{
-        const g = await safeFetch('/json/metadata_bebederos.geojson');
-        const n = (g?.features||[]).length;
-        bebCountEl.textContent = n ? `${n} puntos` : '0';
-        if(n){
-          const pts=L.geoJSON(g,{
-            pointToLayer:(f,latlng)=>L.circleMarker(latlng,{radius:5, color: '#007acc', fillOpacity: 0.8, weight: 1}),
-            onEachFeature:(f,l)=>l.bindTooltip((f.properties?.fuente||'bebedero'))
-          });
-          bebLayer.addLayer(pts);
-          if(!document.getElementById('chk-beb').checked) map.removeLayer(bebLayer);
-        }
+      try{ const g = await safeFetch('/json/metadata_bebederos.geojson'); const n = (g?.features||[]).length; bebCountEl.textContent = n ? `${n} puntos` : '0';
+        if(n){ const pts=L.geoJSON(g,{ pointToLayer:(f,latlng)=>L.circleMarker(latlng,{radius:5, color: '#007acc', fillOpacity: 0.8, weight: 1}), onEachFeature:(f,l)=>l.bindTooltip((f.properties?.fuente||'bebedero')) });
+          bebLayer.addLayer(pts); if(!document.getElementById('chk-beb').checked) map.removeLayer(bebLayer); }
       }catch(e){ logErr(e.message); bebCountEl.textContent='error'; }
     }
-    
-    // --- Checkboxes de Metadata
-    document.getElementById('chk-infra').addEventListener('change',e=>{
-      e.target.checked ? infraLayer.addTo(map) : map.removeLayer(infraLayer);
-    });
-    document.getElementById('chk-beb').addEventListener('change',e=>{
-      e.target.checked ? bebLayer.addTo(map) : map.removeLayer(bebLayer);
-    });
+    document.getElementById('chk-infra').addEventListener('change',e=>{ e.target.checked ? infraLayer.addTo(map) : map.removeLayer(infraLayer); });
+    document.getElementById('chk-beb').addEventListener('change',e=>{ e.target.checked ? bebLayer.addTo(map) : map.removeLayer(bebLayer); });
 
     // --- 3. LÓGICA DE CAPAS DE AMENAZAS (POR HORA) ---
-
-    function tempColor(t){
-      if (t==null) return '#bbbbbb';
-      if (t < 5)  return '#313695'; if (t < 10) return '#4575b4'; if (t < 15) return '#74add1';
-      if (t < 20) return '#abd9e9'; if (t < 25) return '#fdae61'; if (t < 30) return '#f46d43';
-      if (t < 35) return '#d73027'; return '#a50026';
-    }
-    legendTemp.onAdd = function(){
-      const div = L.DomUtil.create('div','info legend');
-      div.style.background='#fff'; div.style.padding='6px 8px'; div.style.borderRadius='6px';
-      const grades=[5,10,15,20,25,30,35]; let html='<b>Temp (°C)</b><br>';
-      for(let i=0;i<grades.length+1;i++){
-        const t = (i===0?grades[0]-1:grades[i-1]+0.01);
-        html += `<i style="background:${tempColor(t)};width:12px;height:12px;display:inline-block;margin-right:4px"></i>` +
-          `${i===0?'<'+grades[0]: (i===grades.length?grades[i-1]+'+':grades[i-1]+'–'+grades[i])}<br>`;
-      }
-      div.innerHTML=html; return div;
-    };
-    
-    function uvColor(u){
-      if (u==null) return '#bbbbbb';
-      if (u < 3)  return '#2dc937'; if (u < 6)  return '#e7b416'; if (u < 8)  return '#ff7f00';
-      if (u < 11) return '#cc3232'; return '#7f00ff';
-    }
-    legendUV.onAdd = function(){
-      const div = L.DomUtil.create('div','info legend');
-      div.style.background='#fff'; div.style.padding='6px 8px'; div.style.borderRadius='6px';
-      div.innerHTML = '<b>UV</b><br>'
-        + `<i style="background:${uvColor(2.9)};display:inline-block;width:12px;height:12px;margin-right:4px"></i>0–2 (Bajo)<br>`
-        + `<i style="background:${uvColor(5.0)};display:inline-block;width:12px;height:12px;margin-right:4px"></i>3–5 (Moderado)<br>`
-        + `<i style="background:${uvColor(7.0)};display:inline-block;width:12px;height:12px;margin-right:4px"></i>6–7 (Alto)<br>`
-        + `<i style="background:${uvColor(9.0)};display:inline-block;width:12px;height:12px;margin-right:4px"></i>8–10 (Muy alto)<br>`
-        + `<i style="background:${uvColor(11.5)};display:inline-block;width:12px;height:12px;margin-right:4px"></i>11+ (Extremo)`;
-      return div;
-    };
-
-    /**
-     * Filtra los GeoJSON globales y redibuja las capas de amenazas para la hora dada.
-     */
+    // (Sin cambios, omitido por brevedad... asumo que está bien)
+    function tempColor(t){ if (t==null) return '#bbbbbb'; if (t < 5)  return '#313695'; if (t < 10) return '#4575b4'; if (t < 15) return '#74add1'; if (t < 20) return '#abd9e9'; if (t < 25) return '#fdae61'; if (t < 30) return '#f46d43'; if (t < 35) return '#d73027'; return '#a50026'; }
+    legendTemp.onAdd = function(){ const div = L.DomUtil.create('div','info legend'); div.style.background='#fff'; div.style.padding='6px 8px'; div.style.borderRadius='6px'; const grades=[5,10,15,20,25,30,35]; let html='<b>Temp (°C)</b><br>'; for(let i=0;i<grades.length+1;i++){ const t = (i===0?grades[0]-1:grades[i-1]+0.01); html += `<i style="background:${tempColor(t)};width:12px;height:12px;display:inline-block;margin-right:4px"></i>` + `${i===0?'<'+grades[0]: (i===grades.length?grades[i-1]+'+':grades[i-1]+'–'+grades[i])}<br>`; } div.innerHTML=html; return div; };
+    function uvColor(u){ if (u==null) return '#bbbbbb'; if (u < 3)  return '#2dc937'; if (u < 6)  return '#e7b416'; if (u < 8)  return '#ff7f00'; if (u < 11) return '#cc3232'; return '#7f00ff'; }
+    legendUV.onAdd = function(){ const div = L.DomUtil.create('div','info legend'); div.style.background='#fff'; div.style.padding='6px 8px'; div.style.borderRadius='6px'; div.innerHTML = '<b>UV</b><br>' + `<i style="background:${uvColor(2.9)};display:inline-block;width:12px;height:12px;margin-right:4px"></i>0–2 (Bajo)<br>` + `<i style="background:${uvColor(5.0)};display:inline-block;width:12px;height:12px;margin-right:4px"></i>3–5 (Moderado)<br>` + `<i style="background:${uvColor(7.0)};display:inline-block;width:12px;height:12px;margin-right:4px"></i>6–7 (Alto)<br>` + `<i style="background:${uvColor(9.0)};display:inline-block;width:12px;height:12px;margin-right:4px"></i>8–10 (Muy alto)<br>` + `<i style="background:${uvColor(11.5)};display:inline-block;width:12px;height:12px;margin-right:4px"></i>11+ (Extremo)`; return div; };
     function updateAmenazas(hora) {
       const h = parseInt(hora, 10);
-      
-      // 1. Actualizar Temperatura
       tempLayer.clearLayers();
       if (g_amenazaTemp && document.getElementById('chk-temp').checked) {
         const feats = g_amenazaTemp.features.filter(f => f.properties?.hora === h);
-        if (feats.length > 0) {
-          const grid = L.geoJSON({type: "FeatureCollection", features: feats}, {
-            style: f => ({ color:'#666', weight:0.5, fillOpacity:0.6, fillColor: tempColor(f.properties?.temp_c) }),
-            onEachFeature: (f,l) => l.bindTooltip(`T: ${f.properties?.temp_c ?? 'n/a'} °C (Hora: ${h})`)
-          });
-          tempLayer.addLayer(grid);
-        }
+        if (feats.length > 0) { const grid = L.geoJSON({type: "FeatureCollection", features: feats}, { style: f => ({ color:'#666', weight:0.5, fillOpacity:0.6, fillColor: tempColor(f.properties?.temp_c) }), onEachFeature: (f,l) => l.bindTooltip(`T: ${f.properties?.temp_c ?? 'n/a'} °C (Hora: ${h})`) }); tempLayer.addLayer(grid); }
       }
-
-      // 2. Actualizar UV
       uvLayer.clearLayers();
       if (g_amenazaUv && document.getElementById('chk-uv').checked) {
         const feats = g_amenazaUv.features.filter(f => f.properties?.hora === h);
-        if (feats.length > 0) {
-          const grid = L.geoJSON({type: "FeatureCollection", features: feats}, {
-            style: f => ({ color:'#666', weight:0.5, fillOpacity:0.55, fillColor: uvColor(f.properties?.uv_index) }),
-            onEachFeature: (f,l) => l.bindTooltip(`UV: ${f.properties?.uv_index ?? 'n/a'} (Hora: ${h})`)
-          });
-          uvLayer.addLayer(grid);
-        }
+        if (feats.length > 0) { const grid = L.geoJSON({type: "FeatureCollection", features: feats}, { style: f => ({ color:'#666', weight:0.5, fillOpacity:0.55, fillColor: uvColor(f.properties?.uv_index) }), onEachFeature: (f,l) => l.bindTooltip(`UV: ${f.properties?.uv_index ?? 'n/a'} (Hora: ${h})`) }); uvLayer.addLayer(grid); }
       }
-      
-      // 3. Actualizar Sombra
       sombraPolysLayer.clearLayers();
       if (g_sombraPolys && document.getElementById('chk-sombra').checked) {
         const feats = g_sombraPolys.features.filter(f => f.properties?.hora === h);
-        if (feats.length > 0) {
-          const polys = L.geoJSON({type: "FeatureCollection", features: feats}, {
-            style:{color:'#000',weight:0,fillOpacity:0.25,fillColor:'#000'}
-          });
-          sombraPolysLayer.addLayer(polys);
-        }
+        if (feats.length > 0) { const polys = L.geoJSON({type: "FeatureCollection", features: feats}, { style:{color:'#000',weight:0,fillOpacity:0.25,fillColor:'#000'} }); sombraPolysLayer.addLayer(polys); }
       }
     }
-    
-    /**
-     * Carga todos los datos de amenazas (todas las horas) en memoria 1 sola vez.
-     */
     async function loadAllAmenazas() {
       const horaActual = new Date().getHours();
-      // Poblar el <select> de horas
-      for (let i = 0; i < 24; i++) {
-        const opt = document.createElement('option');
-        opt.value = i;
-        opt.textContent = `${i}:00`;
-        if (i === horaActual) opt.selected = true;
-        selHora.appendChild(opt);
-      }
-      
-      try {
-        g_amenazaTemp = await safeFetch('/json/amenaza_temp_grid.geojson');
-      } catch (e) { logErr('Fallo carga amenaza_temp_grid.geojson: ' + e.message); }
-      
-      try {
-        g_amenazaUv = await safeFetch('/json/amenaza_uv_grid.geojson');
-      } catch (e) { logErr('Fallo carga amenaza_uv_grid.geojson: ' + e.message); }
-      
-      try {
-        g_sombraPolys = await safeFetch('/json/sombra_poligonos.geojson');
-      } catch (e) { logErr('Fallo carga sombra_poligonos.geojson: ' + e.message); }
-      
-      // Carga inicial al Cargar la página
+      for (let i = 0; i < 24; i++) { const opt = document.createElement('option'); opt.value = i; opt.textContent = `${i}:00`; if (i === horaActual) opt.selected = true; selHora.appendChild(opt); }
+      try { g_amenazaTemp = await safeFetch('/json/amenaza_temp_grid.geojson'); } catch (e) { logErr('Fallo carga amenaza_temp_grid.geojson: ' + e.message); }
+      try { g_amenazaUv = await safeFetch('/json/amenaza_uv_grid.geojson'); } catch (e) { logErr('Fallo carga amenaza_uv_grid.geojson: ' + e.message); }
+      try { g_sombraPolys = await safeFetch('/json/sombra_poligonos.geojson'); } catch (e) { logErr('Fallo carga sombra_poligonos.geojson: ' + e.message); }
       updateAmenazas(horaActual);
-      
-      // Listeners para actualizar dinámicamente
       selHora.addEventListener('change', (e) => updateAmenazas(e.target.value));
-      
       document.getElementById('chk-temp').addEventListener('change', () => updateAmenazas(selHora.value));
       document.getElementById('chk-uv').addEventListener('change', () => updateAmenazas(selHora.value));
       document.getElementById('chk-sombra').addEventListener('change', () => updateAmenazas(selHora.value));
-
-      // Control de leyendas
-      document.getElementById('chk-temp').addEventListener('change', e => {
-        e.target.checked ? legendTemp.addTo(map) : legendTemp.remove();
-      });
-      document.getElementById('chk-uv').addEventListener('change', e => {
-        e.target.checked ? legendUV.addTo(map) : legendUV.remove();
-      });
-      // Mostrar leyendas si están checkeadas al inicio
+      document.getElementById('chk-temp').addEventListener('change', e => { e.target.checked ? legendTemp.addTo(map) : legendTemp.remove(); });
+      document.getElementById('chk-uv').addEventListener('change', e => { e.target.checked ? legendUV.addTo(map) : legendUV.remove(); });
       if (document.getElementById('chk-temp').checked) legendTemp.addTo(map);
       if (document.getElementById('chk-uv').checked) legendUV.addTo(map);
     }
     
     // --- 4. LÓGICA DE RUTEO (FASE 3) ---
-
     const btnRouteCalc = document.getElementById('btn-route-calc');
     const btnRouteReset = document.getElementById('btn-route-reset');
     const routeInfoEl = document.getElementById('route-info');
@@ -310,27 +189,35 @@
       picks = [];
       routeLayerDist.clearLayers();
       routeLayerVars.clearLayers();
+      routeLayerAstar.clearLayers(); // <-- Limpiar capa A*
       routeMarkers.clearLayers();
       routeInfoEl.innerHTML = '';
       clickInfo.textContent = 'Haz 2 clics en el mapa (origen y destino).';
       document.getElementById('time-dist').textContent = '';
       document.getElementById('time-vars').textContent = '';
+      document.getElementById('time-astar').textContent = ''; // <-- Limpiar tiempo A*
       btnRouteCalc.disabled = true;
     }
     
-    // Función central para pedir cualquier ruta a la API
     async function requestRoute(routeType, layer, style, src, dst, hora) {
       let url = '';
       let info = '';
+      let timeElId = '';
       
       if (routeType === 'distancia') {
         url = `http://localhost:8000/route-fase2-dijkstra-distancia?src=${src}&dst=${dst}`;
         info = 'Ruta Distancia: ';
+        timeElId = 'time-dist';
       } else if (routeType === 'variables') {
         url = `http://localhost:8000/route-fase3-dijkstra-vars?src=${src}&dst=${dst}&hora=${hora}`;
-        info = `Ruta Amenazas (Hora ${hora}): `;
+        info = `Ruta Dijkstra (Hora ${hora}): `;
+        timeElId = 'time-vars';
+      } else if (routeType === 'astar') { // <-- NUEVO TIPO DE RUTA
+        url = `http://localhost:8000/route-fase3-astar-vars?src=${src}&dst=${dst}&hora=${hora}`;
+        info = `Ruta A* (Hora ${hora}): `;
+        timeElId = 'time-astar';
       } else {
-        return; // Tipo de ruta no reconocido
+        return;
       }
       
       try {
@@ -349,15 +236,11 @@
         const timeMs = geo.properties?.compute_time_ms;
         const timeStr = `(${timeMs.toFixed(0)} ms)`;
         
-        if (routeType === 'distancia') {
-          document.getElementById('time-dist').textContent = timeStr;
-        } else if (routeType === 'variables') {
-          document.getElementById('time-vars').textContent = timeStr;
-        }
-        
+        document.getElementById(timeElId).textContent = timeStr;
         routeInfoEl.innerHTML += `<div>${info} <span class="ok">OK</span> ${timeStr}</div>`;
         
       } catch(e) {
+        document.getElementById(timeElId).textContent = '(Error)';
         routeInfoEl.innerHTML += `<div>${info} <span class="err">Error: ${e.message}</span></div>`;
         console.error(e);
       }
@@ -370,32 +253,41 @@
       // Limpiar rutas anteriores
       routeLayerDist.clearLayers();
       routeLayerVars.clearLayers();
+      routeLayerAstar.clearLayers(); // <-- Limpiar
       routeInfoEl.innerHTML = 'Calculando...';
       document.getElementById('time-dist').textContent = '';
       document.getElementById('time-vars').textContent = '';
-      
+      document.getElementById('time-astar').textContent = ''; // <-- Limpiar
+
       const src = `${picks[0].lat.toFixed(6)},${picks[0].lng.toFixed(6)}`;
       const dst = `${picks[1].lat.toFixed(6)},${picks[1].lng.toFixed(6)}`;
       const hora = selHora.value;
       
       const chkDist = document.getElementById('chk-route-dist').checked;
       const chkVars = document.getElementById('chk-route-vars').checked;
+      const chkAstar = document.getElementById('chk-route-astar').checked; // <-- Leer
       
       const promises = [];
       
       if (chkDist) {
         promises.push(requestRoute(
-          'distancia', 
-          routeLayerDist, 
+          'distancia', routeLayerDist, 
           {color:'#e63946', weight:5, opacity: 0.7}, // Rojo
           src, dst, null
         ));
       }
       if (chkVars) {
         promises.push(requestRoute(
-          'variables', 
-          routeLayerVars, 
-          {color:'#1d3557', weight:5, opacity: 0.8, dashArray: '5, 5'}, // Azul oscuro
+          'variables', routeLayerVars, 
+          {color:'#1d3557', weight:5, opacity: 0.8}, // Azul oscuro
+          src, dst, hora
+        ));
+      }
+      // <-- AÑADIR LLAMADA A A*
+      if (chkAstar) {
+        promises.push(requestRoute(
+          'astar', routeLayerAstar, 
+          {color:'#008000', weight:4, opacity: 0.9, dashArray: '5, 5'}, // Verde
           src, dst, hora
         ));
       }
@@ -404,63 +296,49 @@
       routeInfoEl.innerHTML += `<div><b>Cálculo finalizado.</b></div>`;
     });
     
-    // Checkboxes para mostrar/ocultar capas de rutas ya calculadas
+    // Checkboxes para mostrar/ocultar capas de rutas
     document.getElementById('chk-route-dist').addEventListener('change', e => {
       e.target.checked ? routeLayerDist.addTo(map) : map.removeLayer(routeLayerDist);
     });
     document.getElementById('chk-route-vars').addEventListener('change', e => {
       e.target.checked ? routeLayerVars.addTo(map) : map.removeLayer(routeLayerVars);
     });
+    // <-- AÑADIR LISTENER PARA A*
+    document.getElementById('chk-route-astar').addEventListener('change', e => {
+      e.target.checked ? routeLayerAstar.addTo(map) : map.removeLayer(routeLayerAstar);
+    });
 
     btnRouteReset.addEventListener('click', resetRoute);
 
-    // Lógica de clics en el mapa
+    // Lógica de clics en el mapa (sin cambios)
     map.on('click', (ev)=>{
       if (picks.length >= 2) return;
-      
       const {lat, lng} = ev.latlng;
       const n = picks.length + 1;
       const label = (n === 1) ? 'Origen' : 'Destino';
-      
-      const m = L.marker([lat,lng], {opacity:0.9})
-                   .bindTooltip(label, {permanent:true, offset:[0,-16]});
+      const m = L.marker([lat,lng], {opacity:0.9}).bindTooltip(label, {permanent:true, offset:[0,-16]});
       routeMarkers.addLayer(m);
       picks.push({lat,lng});
-      
-      if (picks.length === 1) {
-        clickInfo.textContent = 'Haz clic en el mapa para el <b>Destino</b>.';
-      } else {
-        clickInfo.textContent = '¡Listo! Presiona "Calcular Rutas".';
-        btnRouteCalc.disabled = false;
-      }
+      if (picks.length === 1) { clickInfo.textContent = 'Haz clic en el mapa para el <b>Destino</b>.'; }
+      else { clickInfo.textContent = '¡Listo! Presiona "Calcular Rutas".'; btnRouteCalc.disabled = false; }
     });
 
-    // Botón de Geolocalización
+    // Botón de Geolocalización (sin cambios)
     document.getElementById('btn-geoloc').addEventListener('click', () => {
-      if (!navigator.geolocation) {
-        clickInfo.textContent = 'Geolocalización no soportada por tu navegador.';
-        return;
-      }
-      
+      if (!navigator.geolocation) { clickInfo.textContent = 'Geolocalización no soportada.'; return; }
       clickInfo.textContent = 'Obteniendo ubicación...';
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const {latitude, longitude} = position.coords;
-          resetRoute(); // Limpia marcadores anteriores
-          
+          resetRoute(); 
           const latlng = {lat: latitude, lng: longitude};
           picks.push(latlng);
-          
-          const m = L.marker([latlng.lat, latlng.lng], {opacity:0.9})
-                       .bindTooltip('Origen (GPS)', {permanent:true, offset:[0,-16]});
+          const m = L.marker([latlng.lat, latlng.lng], {opacity:0.9}).bindTooltip('Origen (GPS)', {permanent:true, offset:[0,-16]});
           routeMarkers.addLayer(m);
           map.setView([latlng.lat, latlng.lng], 16);
-          
           clickInfo.textContent = 'Origen fijado por GPS. Haz clic en el mapa para el <b>Destino</b>.';
         },
-        () => {
-          clickInfo.textContent = 'No se pudo obtener la ubicación. ¿Diste permisos?';
-        }
+        () => { clickInfo.textContent = 'No se pudo obtener la ubicación. ¿Diste permisos?'; }
       );
     });
 
@@ -469,7 +347,7 @@
       resetRoute(); // Asegura estado inicial limpio
       await loadInfra();
       await loadBeb();
-      await loadAllAmenazas(); // Carga todos los datos de amenazas en memoria
+      await loadAllAmenazas();
     })();
   </script>
 </body>

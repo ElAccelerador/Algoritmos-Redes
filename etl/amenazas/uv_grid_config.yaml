@@ -9,7 +9,7 @@ cells_x: 12   # columnas (W→E)
 api_base: "https://api.openweathermap.org/data/3.0/onecall"
 api_key: "4d8303b04d56d671a3e0281d37bd5717"
 # Solo queremos el UV actual (en current.uvi)
-exclude: "minutely,hourly,daily,alerts"
+exclude: "minutely,daily,alerts"
 units: "metric"
 
 # Pausa entre requests (seg) para no saturar la API

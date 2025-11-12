@@ -92,7 +92,7 @@ CREATE INDEX IF NOT EXISTS idx_calor_grid_geom ON amenaza_calor_grid USING GIST 
 CREATE TABLE IF NOT EXISTS amenaza_uv_grid (
     id SERIAL PRIMARY KEY,
     geom geometry(Polygon, 4326),
-    uv_index REAL,
+    uvi REAL,
     "row" INT,
     "col" INT,
     timestamp BIGINT
