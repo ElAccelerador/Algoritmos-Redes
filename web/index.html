@@ -2,70 +2,123 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Infra Providencia — DEBUG</title>
+  <title>Infra Providencia — FASE 3</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23007acc'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/suncalc@1.9.0/suncalc.min.js"></script>
   <style>
     html,body,#map{height:100%;margin:0}
-    .panel{position:absolute;z-index:1000;top:10px;left:10px;background:#fff;padding:10px 12px;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.15);font:14px system-ui,Segoe UI,Roboto,Arial;min-width:260px}
+    .panel{position:absolute;z-index:1000;top:10px;left:10px;background:#fff;padding:10px 12px;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.15);font:14px system-ui,Segoe UI,Roboto,Arial;min-width:280px;max-height:95vh;overflow-y:auto}
     .row{margin:.35rem 0}
     .err{color:#b00020;font-weight:600}
     .ok{color:#0a7d33}
     code{background:#f3f3f3;padding:2px 4px;border-radius:4px}
+    button{background:#007acc;color:#fff;border:0;padding:5px 8px;border-radius:4px;cursor:pointer}
+    button:hover{background:#005a9e}
+    button:disabled{background:#999;cursor:default}
+    .route-legend{font-size:12px;padding-left:1.5rem}
+    .route-legend span{display:inline-block;width:20px;height:4px;border-radius:2px;margin-right:4px;vertical-align:middle}
+    #route-info{font-size:12px;color:#333;margin-top:8px;max-height:100px;overflow-y:auto}
   </style>
 </head>
 <body>
   <div id="map"></div>
   <div class="panel">
-    <div class="row"><label><input id="chk-infra" type="checkbox" checked> Infraestructura</label></div>
-    <div class="row"><label><input id="chk-beb"   type="checkbox" checked> Bebederos</label></div>
-    <div class="row"><label><input id="chk-uv" type="checkbox" checked> UV (grilla)</label></div>
-    <div class="row"><label><input id="chk-temp" type="checkbox" checked> Temperatura (grilla)</label></div>
-    <div class="row"><label><input id="chk-sombra" type="checkbox" checked> Sombra (12:00)</label></div>
-    <div class="row">
-      <label><input id="chk-route" type="checkbox"> Ruta (pgr_dijkstra)</label>
-      <button id="btn-route-reset" type="button" style="margin-left:.5rem">Reset</button>
+    <b>1. Capas (Metadata y Amenazas)</b>
+    <div class="row" style="margin-top:8px">
+      <label for="sel-hora"><b>Hora seleccionada:</b></label>
+      <select id="sel-hora" style="padding:4px;margin-left:4px"></select>
     </div>
-    <div class="row" id="route-info" style="font-size:12px;color:#333"></div>
+    <div class="row" style="border-top:1px solid #eee;margin-top:8px;padding-top:8px">
+      <label><input id="chk-infra" type="checkbox" checked> Infraestructura (<span id="infra-count">—</span>)</label>
+    </div>
+    <div class="row"><label><input id="chk-beb" type="checkbox" checked> Bebederos (<span id="beb-count">—</span>)</label></div>
+    <div class="row"><label><input id="chk-temp" type="checkbox" checked> Temperatura (por hora)</label></div>
+    <div class="row"><label><input id="chk-uv" type="checkbox" checked> UV (por hora)</label></div>
+    <div class="row"><label><input id="chk-sombra" type="checkbox" checked> Sombra (por hora)</label></div>
+    
     <hr>
-    <div class="row"><b>Infra:</b> <span id="infra-count">—</span></div>
-    <div class="row"><b>Bebederos:</b> <span id="beb-count">—</span></div>
-    <div class="row err" id="errors"></div>
-    <div class="row">Ruta esperada de archivos: <code>/json/*.geojson</code></div>
-    <div class="row">URL actual: <code id="url"></code></div>
+    <b>2. Rutas (Fase 3)</b>
+    <div class="row" style="margin-top:8px">
+      <button id="btn-geoloc">Usar mi ubicación (Origen)</button>
+    </div>
+    <div class="row" style="font-size:12px;color:#333" id="click-info">
+      Haz 2 clics en el mapa (origen y destino).
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label><input id="chk-route-dist" type="checkbox" checked> <b>Ruta Distancia</b> (Fase 2)</label>
+      <div class="route-legend"><span style="background:#e63946"></span><i id="time-dist"></i></div>
+    </div>
+    <div class="row">
+      <label><input id="chk-route-vars" type="checkbox" checked> <b>Ruta Amenazas</b> (Fase 3)</label>
+      <div class="route-legend"><span style="background:#1d3557"></span><i id="time-vars"></i></div>
+    </div>
+    <div class="row">
+      <button id="btn-route-calc">Calcular Rutas</button>
+      <button id="btn-route-reset" style="margin-left:.5rem;background:#777">Reset</button>
+    </div>
+    
+    <div id="route-info"></div>
+    <div class="err" id="errors" style="margin-top:10px"></div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
+  
   <script>
-    // --- MAPA BASE PRIMERO (antes de cualquier uso de `map`) ---
-    document.getElementById('url').textContent = window.location.pathname;
-
+    // --- 1. CONFIGURACIÓN DEL MAPA Y CAPAS BASE ---
     const map = L.map('map').setView([-33.431,-70.618], 15);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OSM'}).addTo(map);
 
-    const infraLayer = L.layerGroup();
-    const bebLayer   = L.layerGroup();
-
+    // --- Elementos del DOM
+    const errorsEl   = document.getElementById('errors');
+    const selHora    = document.getElementById('sel-hora');
+    
+    // --- Capas de Metadata
+    const infraLayer = L.layerGroup().addTo(map);
+    const bebLayer   = L.layerGroup().addTo(map);
     const infraCountEl = document.getElementById('infra-count');
     const bebCountEl   = document.getElementById('beb-count');
-    const errorsEl     = document.getElementById('errors');
 
+    // --- Capas de Amenazas (Dinámicas por hora)
+    const tempLayer        = L.layerGroup().addTo(map);
+    const uvLayer          = L.layerGroup().addTo(map);
+    const sombraPolysLayer = L.layerGroup().addTo(map);
+    const sombraRoadsLayer = L.layerGroup(); // No se muestra por defecto
+    const legendTemp     = L.control({position:'bottomright'});
+    const legendUV       = L.control({position:'bottomleft'});
+    
+    // --- Capas de Rutas (Comparativas)
+    const routeLayerDist = L.layerGroup().addTo(map);
+    const routeLayerVars = L.layerGroup().addTo(map);
+    const routeMarkers   = L.layerGroup().addTo(map);
+
+    // --- Almacenes de Datos Globales (para filtrado por hora)
+    let g_amenazaTemp = null;
+    let g_amenazaUv   = null;
+    let g_sombraPolys = null;
+    let g_sombraRoads = null;
+
+    // --- Estado de Ruteo
+    let picks = [];
+    const clickInfo = document.getElementById('click-info');
+
+    // --- Helper de Logging
     function logErr(msg){
       console.error(msg);
       const div=document.createElement('div'); div.textContent=msg;
       errorsEl.appendChild(div);
     }
-
-    async function safeFetch(url){
+    
+    // --- Helper de Fetch
+    async function safeFetch(url, isJson=true){
       const u = url + (url.includes('?')?'&':'?') + 'v=' + Date.now();
       const r = await fetch(u);
       if(!r.ok){ throw new Error(`GET ${url} -> ${r.status}`); }
+      if (!isJson) return r.text();
       return r.json();
     }
-
+    
+    // --- 2. LÓGICA DE CARGA DE CAPAS (METADATA) ---
+    // (Estas no cambian, son como en Fase 2)
     async function loadInfra(){
       infraLayer.clearLayers();
       let total=0;
@@ -81,16 +134,14 @@
           const g = await safeFetch(url);
           if(!g?.features?.length) continue;
           total += g.features.length;
-          added.push(L.geoJSON(g,{style:()=>({weight:2})}));
+          added.push(L.geoJSON(g,{style:()=>({weight:2, color: '#555'})}));
         }catch(e){ logErr(e.message); }
       }
       added.forEach(l=>infraLayer.addLayer(l));
       infraCountEl.textContent = total ? `${total} features` : '0';
-      if(document.getElementById('chk-infra').checked && infraLayer.getLayers().length){
+      if(document.getElementById('chk-infra').checked){
         infraLayer.addTo(map);
         try{ map.fitBounds(infraLayer.getBounds(),{padding:[20,20]}); }catch(_){}
-      }else{
-        map.removeLayer(infraLayer);
       }
     }
 
@@ -102,89 +153,48 @@
         bebCountEl.textContent = n ? `${n} puntos` : '0';
         if(n){
           const pts=L.geoJSON(g,{
-            pointToLayer:(f,latlng)=>L.circleMarker(latlng,{radius:5}),
+            pointToLayer:(f,latlng)=>L.circleMarker(latlng,{radius:5, color: '#007acc', fillOpacity: 0.8, weight: 1}),
             onEachFeature:(f,l)=>l.bindTooltip((f.properties?.fuente||'bebedero'))
           });
           bebLayer.addLayer(pts);
-          if(document.getElementById('chk-beb').checked) bebLayer.addTo(map);
-        }else{
-          map.removeLayer(bebLayer);
+          if(!document.getElementById('chk-beb').checked) map.removeLayer(bebLayer);
         }
-      }catch(e){
-        logErr(e.message);
-        bebCountEl.textContent='error';
-        map.removeLayer(bebLayer);
-      }
+      }catch(e){ logErr(e.message); bebCountEl.textContent='error'; }
     }
-
+    
+    // --- Checkboxes de Metadata
     document.getElementById('chk-infra').addEventListener('change',e=>{
       e.target.checked ? infraLayer.addTo(map) : map.removeLayer(infraLayer);
     });
     document.getElementById('chk-beb').addEventListener('change',e=>{
       e.target.checked ? bebLayer.addTo(map) : map.removeLayer(bebLayer);
     });
-  </script>
 
-  <script>
-    // --- Choropleth de temperatura ---
+    // --- 3. LÓGICA DE CAPAS DE AMENAZAS (POR HORA) ---
+
     function tempColor(t){
       if (t==null) return '#bbbbbb';
-      if (t < 5)  return '#313695';
-      if (t < 10) return '#4575b4';
-      if (t < 15) return '#74add1';
-      if (t < 20) return '#abd9e9';
-      if (t < 25) return '#fdae61';
-      if (t < 30) return '#f46d43';
-      if (t < 35) return '#d73027';
-      return '#a50026';
+      if (t < 5)  return '#313695'; if (t < 10) return '#4575b4'; if (t < 15) return '#74add1';
+      if (t < 20) return '#abd9e9'; if (t < 25) return '#fdae61'; if (t < 30) return '#f46d43';
+      if (t < 35) return '#d73027'; return '#a50026';
     }
-    const tempLayer = L.layerGroup();
-    const legend = L.control({position:'bottomright'});
-    legend.onAdd = function(){
+    legendTemp.onAdd = function(){
       const div = L.DomUtil.create('div','info legend');
       div.style.background='#fff'; div.style.padding='6px 8px'; div.style.borderRadius='6px';
-      const grades=[5,10,15,20,25,30,35];
-      let html='<b>Temp (°C)</b><br>';
+      const grades=[5,10,15,20,25,30,35]; let html='<b>Temp (°C)</b><br>';
       for(let i=0;i<grades.length+1;i++){
         const t = (i===0?grades[0]-1:grades[i-1]+0.01);
         html += `<i style="background:${tempColor(t)};width:12px;height:12px;display:inline-block;margin-right:4px"></i>` +
-                `${i===0?'<'+grades[0]: (i===grades.length?grades[i-1]+'+':grades[i-1]+'–'+grades[i])}<br>`;
+          `${i===0?'<'+grades[0]: (i===grades.length?grades[i-1]+'+':grades[i-1]+'–'+grades[i])}<br>`;
       }
       div.innerHTML=html; return div;
     };
-    async function loadTemp(){
-      tempLayer.clearLayers();
-      try{
-        const r = await fetch('/json/amenaza_temp_grid.geojson?v='+Date.now());
-        if(!r.ok) throw new Error('GET amenaza_temp_grid.geojson '+r.status);
-        const g = await r.json();
-        const grid = L.geoJSON(g, {
-          style: f => ({ color:'#666', weight:0.5, fillOpacity:0.6, fillColor: tempColor(f.properties?.temp_c) }),
-          onEachFeature: (f,l) => l.bindTooltip(`T: ${f.properties?.temp_c ?? 'n/a'} °C`)
-        });
-        tempLayer.addLayer(grid);
-        if (document.getElementById('chk-temp').checked) tempLayer.addTo(map); else map.removeLayer(tempLayer);
-        if (document.getElementById('chk-temp').checked){ legend.addTo(map); } else { legend.remove(); }
-      }catch(e){ console.error(e); map.removeLayer(tempLayer); legend.remove?.(); }
-    }
-    document.getElementById('chk-temp').addEventListener('change', e=>{
-      if (e.target.checked){ tempLayer.addTo(map); legend.addTo(map); }
-      else { map.removeLayer(tempLayer); legend.remove?.(); }
-    });
-  </script>
-
-  <script>
-    // --- UV ---
+    
     function uvColor(u){
       if (u==null) return '#bbbbbb';
-      if (u < 3)  return '#2dc937';
-      if (u < 6)  return '#e7b416';
-      if (u < 8)  return '#ff7f00';
-      if (u < 11) return '#cc3232';
-      return '#7f00ff';
+      if (u < 3)  return '#2dc937'; if (u < 6)  return '#e7b416'; if (u < 8)  return '#ff7f00';
+      if (u < 11) return '#cc3232'; return '#7f00ff';
     }
-    const uvLayer = L.layerGroup();
-    const legendUV = L.control({position:'bottomleft'});
     legendUV.onAdd = function(){
       const div = L.DomUtil.create('div','info legend');
       div.style.background='#fff'; div.style.padding='6px 8px'; div.style.borderRadius='6px';
@@ -196,142 +206,270 @@
         + `<i style="background:${uvColor(11.5)};display:inline-block;width:12px;height:12px;margin-right:4px"></i>11+ (Extremo)`;
       return div;
     };
-    async function loadUV(){
-      uvLayer.clearLayers();
-      try{
-        const r = await fetch('/json/amenaza_uv_grid.geojson?v='+Date.now());
-        if(!r.ok) throw new Error('GET amenaza_uv_grid.geojson '+r.status);
-        const g = await r.json();
-        const grid = L.geoJSON(g, {
-          style: f => ({ color:'#666', weight:0.5, fillOpacity:0.55, fillColor: uvColor(f.properties?.uv_index) }),
-          onEachFeature: (f,l) => l.bindTooltip(`UV: ${f.properties?.uv_index ?? 'n/a'}`)
-        });
-        uvLayer.addLayer(grid);
-        if (document.getElementById('chk-uv').checked) { uvLayer.addTo(map); legendUV.addTo(map); }
-        else { map.removeLayer(uvLayer); legendUV.remove?.(); }
-      }catch(e){ console.error(e); map.removeLayer(uvLayer); legendUV.remove?.(); }
-    }
-    document.getElementById('chk-uv').addEventListener('change', e=>{
-      if (e.target.checked){ uvLayer.addTo(map); legendUV.addTo(map); }
-      else { map.removeLayer(uvLayer); legendUV.remove?.(); }
-    });
-  </script>
 
-  <script>
-    // --- Sombras precalculadas ---
-    const sombraPolysLayer = L.layerGroup();
-    const sombraRoadsLayer = L.layerGroup();
-    async function loadSombraStatic(){
-      sombraPolysLayer.clearLayers();
-      sombraRoadsLayer.clearLayers();
-      try{
-        const sp = await fetch('/json/sombra_poligonos.geojson?v='+Date.now()).then(r=>r.json());
-        const sr = await fetch('/json/infra_sombreada.geojson?v='+Date.now()).then(r=>r.json());
-        const polys = L.geoJSON(sp,{style:{color:'#000',weight:0,fillOpacity:0.25,fillColor:'#000'}});
-        const roads = L.geoJSON(sr,{style:{color:'#222',weight:3}});
-        sombraPolysLayer.addLayer(polys);
-        sombraRoadsLayer.addLayer(roads);
-        if (document.getElementById('chk-sombra').checked){
-          sombraPolysLayer.addTo(map); sombraRoadsLayer.addTo(map);
-        } else {
-          map.removeLayer(sombraPolysLayer); map.removeLayer(sombraRoadsLayer);
+    /**
+     * Filtra los GeoJSON globales y redibuja las capas de amenazas para la hora dada.
+     */
+    function updateAmenazas(hora) {
+      const h = parseInt(hora, 10);
+      
+      // 1. Actualizar Temperatura
+      tempLayer.clearLayers();
+      if (g_amenazaTemp && document.getElementById('chk-temp').checked) {
+        const feats = g_amenazaTemp.features.filter(f => f.properties?.hora === h);
+        if (feats.length > 0) {
+          const grid = L.geoJSON({type: "FeatureCollection", features: feats}, {
+            style: f => ({ color:'#666', weight:0.5, fillOpacity:0.6, fillColor: tempColor(f.properties?.temp_c) }),
+            onEachFeature: (f,l) => l.bindTooltip(`T: ${f.properties?.temp_c ?? 'n/a'} °C (Hora: ${h})`)
+          });
+          tempLayer.addLayer(grid);
         }
-      }catch(e){ console.error(e); }
+      }
+
+      // 2. Actualizar UV
+      uvLayer.clearLayers();
+      if (g_amenazaUv && document.getElementById('chk-uv').checked) {
+        const feats = g_amenazaUv.features.filter(f => f.properties?.hora === h);
+        if (feats.length > 0) {
+          const grid = L.geoJSON({type: "FeatureCollection", features: feats}, {
+            style: f => ({ color:'#666', weight:0.5, fillOpacity:0.55, fillColor: uvColor(f.properties?.uv_index) }),
+            onEachFeature: (f,l) => l.bindTooltip(`UV: ${f.properties?.uv_index ?? 'n/a'} (Hora: ${h})`)
+          });
+          uvLayer.addLayer(grid);
+        }
+      }
+      
+      // 3. Actualizar Sombra
+      sombraPolysLayer.clearLayers();
+      if (g_sombraPolys && document.getElementById('chk-sombra').checked) {
+        const feats = g_sombraPolys.features.filter(f => f.properties?.hora === h);
+        if (feats.length > 0) {
+          const polys = L.geoJSON({type: "FeatureCollection", features: feats}, {
+            style:{color:'#000',weight:0,fillOpacity:0.25,fillColor:'#000'}
+          });
+          sombraPolysLayer.addLayer(polys);
+        }
+      }
     }
-    document.getElementById('chk-sombra').addEventListener('change', e=>{
-      if (e.target.checked){ sombraPolysLayer.addTo(map); sombraRoadsLayer.addTo(map); }
-      else { map.removeLayer(sombraPolysLayer); map.removeLayer(sombraRoadsLayer); }
-    });
-  </script>
+    
+    /**
+     * Carga todos los datos de amenazas (todas las horas) en memoria 1 sola vez.
+     */
+    async function loadAllAmenazas() {
+      const horaActual = new Date().getHours();
+      // Poblar el <select> de horas
+      for (let i = 0; i < 24; i++) {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = `${i}:00`;
+        if (i === horaActual) opt.selected = true;
+        selHora.appendChild(opt);
+      }
+      
+      try {
+        g_amenazaTemp = await safeFetch('/json/amenaza_temp_grid.geojson');
+      } catch (e) { logErr('Fallo carga amenaza_temp_grid.geojson: ' + e.message); }
+      
+      try {
+        g_amenazaUv = await safeFetch('/json/amenaza_uv_grid.geojson');
+      } catch (e) { logErr('Fallo carga amenaza_uv_grid.geojson: ' + e.message); }
+      
+      try {
+        g_sombraPolys = await safeFetch('/json/sombra_poligonos.geojson');
+      } catch (e) { logErr('Fallo carga sombra_poligonos.geojson: ' + e.message); }
+      
+      // Carga inicial al Cargar la página
+      updateAmenazas(horaActual);
+      
+      // Listeners para actualizar dinámicamente
+      selHora.addEventListener('change', (e) => updateAmenazas(e.target.value));
+      
+      document.getElementById('chk-temp').addEventListener('change', () => updateAmenazas(selHora.value));
+      document.getElementById('chk-uv').addEventListener('change', () => updateAmenazas(selHora.value));
+      document.getElementById('chk-sombra').addEventListener('change', () => updateAmenazas(selHora.value));
 
-  <script>
-    // --- RUTA: este bloque VA DESPUÉS de crear el `map` ---
-    const routeLayer   = L.layerGroup().addTo(map);
-    const routeMarkers = L.layerGroup().addTo(map);
+      // Control de leyendas
+      document.getElementById('chk-temp').addEventListener('change', e => {
+        e.target.checked ? legendTemp.addTo(map) : legendTemp.remove();
+      });
+      document.getElementById('chk-uv').addEventListener('change', e => {
+        e.target.checked ? legendUV.addTo(map) : legendUV.remove();
+      });
+      // Mostrar leyendas si están checkeadas al inicio
+      if (document.getElementById('chk-temp').checked) legendTemp.addTo(map);
+      if (document.getElementById('chk-uv').checked) legendUV.addTo(map);
+    }
+    
+    // --- 4. LÓGICA DE RUTEO (FASE 3) ---
 
-    let routingMode = false;
-    let picks = [];
-
-    const chkRoute = document.getElementById('chk-route');
-    const btnReset = document.getElementById('btn-route-reset');
-    const routeInfo = document.getElementById('route-info');
-
+    const btnRouteCalc = document.getElementById('btn-route-calc');
+    const btnRouteReset = document.getElementById('btn-route-reset');
+    const routeInfoEl = document.getElementById('route-info');
+    
     function resetRoute() {
       picks = [];
-      routeLayer.clearLayers();
+      routeLayerDist.clearLayers();
+      routeLayerVars.clearLayers();
       routeMarkers.clearLayers();
-      routeInfo.textContent = '';
+      routeInfoEl.innerHTML = '';
+      clickInfo.textContent = 'Haz 2 clics en el mapa (origen y destino).';
+      document.getElementById('time-dist').textContent = '';
+      document.getElementById('time-vars').textContent = '';
+      btnRouteCalc.disabled = true;
     }
-
-    async function requestRoute() {
-      if (picks.length !== 2) return;
-      const src = `${picks[0].lat.toFixed(6)},${picks[0].lng.toFixed(6)}`;
-      const dst = `${picks[1].lat.toFixed(6)},${picks[1].lng.toFixed(6)}`;
-      routeInfo.textContent = 'Calculando ruta…';
+    
+    // Función central para pedir cualquier ruta a la API
+    async function requestRoute(routeType, layer, style, src, dst, hora) {
+      let url = '';
+      let info = '';
+      
+      if (routeType === 'distancia') {
+        url = `http://localhost:8000/route-fase2-dijkstra-distancia?src=${src}&dst=${dst}`;
+        info = 'Ruta Distancia: ';
+      } else if (routeType === 'variables') {
+        url = `http://localhost:8000/route-fase3-dijkstra-vars?src=${src}&dst=${dst}&hora=${hora}`;
+        info = `Ruta Amenazas (Hora ${hora}): `;
+      } else {
+        return; // Tipo de ruta no reconocido
+      }
+      
       try {
-        const r = await fetch(`http://localhost:8000/route?src=${src}&dst=${dst}`);
-        if (!r.ok) throw new Error(`API ${r.status}`);
-        const geo = await r.json();
-        routeLayer.clearLayers();
-
-        // Manejo de “geometry:null” (no hay ruta en el grafo)
-        const geom = geo?.features?.[0]?.geometry || null;
-        if (!geom) {
-          routeInfo.textContent = 'Sin ruta posible entre los puntos (grafo desconectado).';
+        const geo = await safeFetch(url);
+        const features = geo?.features || [];
+        
+        if (features.length === 0) {
+          routeInfoEl.innerHTML += `<div>${info} <span class="err">Sin ruta posible.</span></div>`;
           return;
         }
 
-        const route = L.geoJSON(geo, {style:{color:'#ff006e', weight:5}});
-        routeLayer.addLayer(route);
+        const route = L.geoJSON(geo, { style: style });
+        layer.addLayer(route);
         try { map.fitBounds(route.getBounds(), {padding:[20,20]}); } catch(_){}
-        routeInfo.textContent = `Ruta lista ${src} → ${dst}`;
+        
+        const timeMs = geo.properties?.compute_time_ms;
+        const timeStr = `(${timeMs.toFixed(0)} ms)`;
+        
+        if (routeType === 'distancia') {
+          document.getElementById('time-dist').textContent = timeStr;
+        } else if (routeType === 'variables') {
+          document.getElementById('time-vars').textContent = timeStr;
+        }
+        
+        routeInfoEl.innerHTML += `<div>${info} <span class="ok">OK</span> ${timeStr}</div>`;
+        
       } catch(e) {
-        // Si ves “TypeError: Failed to fetch” aquí, es CORS (puertos 8080→8000)
-        routeInfo.textContent = `Error: ${e.message}`;
+        routeInfoEl.innerHTML += `<div>${info} <span class="err">Error: ${e.message}</span></div>`;
         console.error(e);
       }
     }
 
-    function enableRouting() {
-      routingMode = true;
-      resetRoute();
-      routeInfo.textContent = 'Haz 2 clics en el mapa (origen y destino).';
-      map.getContainer().style.cursor = 'crosshair';
-    }
-    function disableRouting() {
-      routingMode = false;
-      map.getContainer().style.cursor = '';
-      routeInfo.textContent = '';
-    }
+    // Botón principal de "Calcular Rutas"
+    btnRouteCalc.addEventListener('click', async () => {
+      if (picks.length !== 2) return;
+      
+      // Limpiar rutas anteriores
+      routeLayerDist.clearLayers();
+      routeLayerVars.clearLayers();
+      routeInfoEl.innerHTML = 'Calculando...';
+      document.getElementById('time-dist').textContent = '';
+      document.getElementById('time-vars').textContent = '';
+      
+      const src = `${picks[0].lat.toFixed(6)},${picks[0].lng.toFixed(6)}`;
+      const dst = `${picks[1].lat.toFixed(6)},${picks[1].lng.toFixed(6)}`;
+      const hora = selHora.value;
+      
+      const chkDist = document.getElementById('chk-route-dist').checked;
+      const chkVars = document.getElementById('chk-route-vars').checked;
+      
+      const promises = [];
+      
+      if (chkDist) {
+        promises.push(requestRoute(
+          'distancia', 
+          routeLayerDist, 
+          {color:'#e63946', weight:5, opacity: 0.7}, // Rojo
+          src, dst, null
+        ));
+      }
+      if (chkVars) {
+        promises.push(requestRoute(
+          'variables', 
+          routeLayerVars, 
+          {color:'#1d3557', weight:5, opacity: 0.8, dashArray: '5, 5'}, // Azul oscuro
+          src, dst, hora
+        ));
+      }
+      
+      await Promise.all(promises);
+      routeInfoEl.innerHTML += `<div><b>Cálculo finalizado.</b></div>`;
+    });
+    
+    // Checkboxes para mostrar/ocultar capas de rutas ya calculadas
+    document.getElementById('chk-route-dist').addEventListener('change', e => {
+      e.target.checked ? routeLayerDist.addTo(map) : map.removeLayer(routeLayerDist);
+    });
+    document.getElementById('chk-route-vars').addEventListener('change', e => {
+      e.target.checked ? routeLayerVars.addTo(map) : map.removeLayer(routeLayerVars);
+    });
 
+    btnRouteReset.addEventListener('click', resetRoute);
+
+    // Lógica de clics en el mapa
     map.on('click', (ev)=>{
-      if (!routingMode) return;
+      if (picks.length >= 2) return;
+      
       const {lat, lng} = ev.latlng;
       const n = picks.length + 1;
+      const label = (n === 1) ? 'Origen' : 'Destino';
+      
       const m = L.marker([lat,lng], {opacity:0.9})
-                 .bindTooltip(n===1?'Origen':'Destino', {permanent:true, offset:[0,-16]});
+                   .bindTooltip(label, {permanent:true, offset:[0,-16]});
       routeMarkers.addLayer(m);
       picks.push({lat,lng});
-      if (picks.length === 2) requestRoute();
-      else routeInfo.textContent = 'Selecciona destino…';
+      
+      if (picks.length === 1) {
+        clickInfo.textContent = 'Haz clic en el mapa para el <b>Destino</b>.';
+      } else {
+        clickInfo.textContent = '¡Listo! Presiona "Calcular Rutas".';
+        btnRouteCalc.disabled = false;
+      }
     });
 
-    chkRoute.addEventListener('change', e=>{
-      if (e.target.checked) enableRouting();
-      else { disableRouting(); resetRoute(); }
-    });
-    btnReset.addEventListener('click', ()=>{
-      resetRoute();
-      if (routingMode) routeInfo.textContent = 'Haz 2 clics en el mapa (origen y destino).';
+    // Botón de Geolocalización
+    document.getElementById('btn-geoloc').addEventListener('click', () => {
+      if (!navigator.geolocation) {
+        clickInfo.textContent = 'Geolocalización no soportada por tu navegador.';
+        return;
+      }
+      
+      clickInfo.textContent = 'Obteniendo ubicación...';
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const {latitude, longitude} = position.coords;
+          resetRoute(); // Limpia marcadores anteriores
+          
+          const latlng = {lat: latitude, lng: longitude};
+          picks.push(latlng);
+          
+          const m = L.marker([latlng.lat, latlng.lng], {opacity:0.9})
+                       .bindTooltip('Origen (GPS)', {permanent:true, offset:[0,-16]});
+          routeMarkers.addLayer(m);
+          map.setView([latlng.lat, latlng.lng], 16);
+          
+          clickInfo.textContent = 'Origen fijado por GPS. Haz clic en el mapa para el <b>Destino</b>.';
+        },
+        () => {
+          clickInfo.textContent = 'No se pudo obtener la ubicación. ¿Diste permisos?';
+        }
+      );
     });
 
-    // --- CARGAS INICIALES ---
+    // --- 5. CARGAS INICIALES ---
     (async()=>{
+      resetRoute(); // Asegura estado inicial limpio
       await loadInfra();
       await loadBeb();
-      await loadTemp();
-      await loadUV();
-      await loadSombraStatic();
+      await loadAllAmenazas(); // Carga todos los datos de amenazas en memoria
     })();
   </script>
 </body>

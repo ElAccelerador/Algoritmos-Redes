@@ -32,7 +32,8 @@ for f in infra_provi_sector.geojson infra_provi_sector_south.geojson infra_provi
 done
 # Apuntamos a /data/db_scripts/load/
 docker compose exec -T db psql -U postgres -d gis -v ON_ERROR_STOP=1 -f /data/db_scripts/load/load_infra.sql
-
+echo "[4.1/6] Añadiendo columnas de costo (Fase 3) a via_arista..."
+docker compose exec -T db psql -U postgres -d gis -v ON_ERROR_STOP=1 -f /data/db_scripts/load/005_fase3_alter_aristas.sql
 # (El resto de esta sección ya usaba /data/json/, por lo que estaba bien)
 # Bebederos
 if [ -s json/metadata_bebederos.geojson ]; then
@@ -72,14 +73,8 @@ docker compose exec -T db psql -U postgres -d gis -c "SELECT COUNT(*) edificios 
 docker compose exec -T db psql -U postgres -d gis -c "SELECT COUNT(*) uv_celdas FROM amenaza_uv_grid;"
 docker compose exec -T db psql -U postgres -d gis -c "SELECT COUNT(*) temp_celdas FROM amenaza_calor_grid;"
 
-echo "[6.1/6] Creando topología de red pgRouting..."
-docker compose exec -T db psql -U postgres -d gis -c "SELECT pgr_createTopology('via_arista', 0.00001, 'geom', 'id');"
-# (Ajusta la tolerancia 0.00001 si es necesario)
-docker compose exec -T db psql -U postgres -d gis -c "ALTER TABLE via_arista_vertices_pgr ADD COLUMN geom geometry(Point, 4326);"
-docker compose exec -T db psql -U postgres -d gis -c "UPDATE via_arista_vertices_pgr v SET geom = n.geom FROM via_nodo n WHERE v.id = n.id;"
 
-
-echo "[6.2/6] Listo."
+echo "[6/6] Listo."
 echo "Web:    http://localhost:8080/index.html"
 echo "API:    http://localhost:8000/health"
 echo "Ruta:   http://localhost:8000/route?src=-33.445,-70.66&dst=-33.425,-70.635"

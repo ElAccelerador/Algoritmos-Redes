@@ -2,78 +2,82 @@
 import json, time, math
 from pathlib import Path
 import requests, yaml
+from datetime import datetime
 
 CFG = yaml.safe_load(Path("etl/amenazas/temp_grid_config.yaml").read_text())
 S,W,N,E = CFG["bbox"]
-NY, NX = int(CFG["cells_y"]), int(CFG["cells_x"])
-API = CFG["api_base"]; Q = CFG["query"]
-SLEEP = float(CFG.get("sleep_s", 0.15))
+# <-- MODIFICADO: Ya no leemos NY, NX. Usaremos 1 solo polígono.
+API = CFG["api_base"]
+Q = "hourly=temperature_2m&forecast_days=1" 
+SLEEP = float(CFG.get("sleep_s", 0.15)) # (Aunque ahora solo se usa 1 vez)
 
-def linspace(a,b,n):
-    if n==1: return [a]
-    step=(b-a)/n
-    return [a+i*step for i in range(n+1)]
+# <-- MODIFICADO: Eliminadas las funciones linspace() y mk_grid()
 
-def mk_grid(bbox, ny, nx):
-    S,W,N,E = bbox
-    ys = linspace(N, S, ny)   # de norte a sur
-    xs = linspace(W, E, nx)   # de oeste a este
-    cells=[]
-    for iy in range(ny):
-        for ix in range(nx):
-            y1, y0 = ys[iy], ys[iy+1]
-            x0, x1 = xs[ix], xs[ix+1]
-            poly = [[x0,y1],[x1,y1],[x1,y0],[x0,y0],[x0,y1]]
-            cy = (y0+y1)/2.0
-            cx = (x0+x1)/2.0
-            cells.append({"poly":poly, "centroid":[cx,cy], "row":iy, "col":ix})
-    return cells
-
-def fetch_temp(lat, lon):
-    # Open-Meteo: temperatura actual (°C) en current_weather.temperature
+def fetch_temp_hourly(lat, lon):
     url = f"{API}?latitude={lat:.6f}&longitude={lon:.6f}&{Q}"
     r = requests.get(url, timeout=30)
     r.raise_for_status()
     j = r.json()
-    cw = j.get("current_weather") or {}
-    t  = cw.get("temperature")
-    tm = cw.get("time")
-    return t, tm, j
+    
+    hourly_data = j.get("hourly", {})
+    times = hourly_data.get("time", [])
+    temps = hourly_data.get("temperature_2m", [])
+    
+    results = []
+    if times and temps and len(times) == len(temps):
+        for iso_time, temp_val in zip(times, temps):
+            try:
+                hour = datetime.fromisoformat(iso_time).hour
+                results.append({"hora": hour, "temp": temp_val})
+            except (ValueError, TypeError):
+                continue
+    return results, j.get("generationtime_ms", 0)
 
 def main():
     Path("json").mkdir(parents=True, exist_ok=True)
-    cells = mk_grid((S,W,N,E), NY, NX)
     feats=[]
-    meta_time=None
-    for c in cells:
-        lat = c["centroid"][1]
-        lon = c["centroid"][0]
-        try:
-            t, tm, raw = fetch_temp(lat, lon)
-            if meta_time is None: meta_time = tm
-        except Exception as e:
-            t, raw = None, {"error": str(e)}
+    meta_time=datetime.now().isoformat()
+
+    # <-- MODIFICADO: Definimos un solo polígono para todo el BBOX
+    full_bbox_poly = [[W,N],[E,N],[E,S],[W,S],[W,N]]
+    
+    # <-- MODIFICADO: Calculamos un solo punto central para la consulta
+    lat_center = (S + N) / 2.0
+    lon_center = (W + E) / 2.0
+
+    try:
+        # <-- MODIFICADO: Hacemos UNA sola llamada a la API
+        hourly_results, _gen_time = fetch_temp_hourly(lat_center, lon_center)
+    except Exception as e:
+        print(f"[ERROR] Falló el fetch de Open-Meteo: {e}")
+        hourly_results = []
+        sys.exit(1) # Salimos si la API falla
+
+    # <-- MODIFICADO: Bucle para crear un feature POR HORA, usando el mismo polígono
+    for data_point in hourly_results:
         props = {
-            "temp_c": t,
-            "row": c["row"],
-            "col": c["col"],
-            "centroid": {"lon": lon, "lat": lat}
+            "temp_c": data_point["temp"],
+            "hora": data_point["hora"], # La propiedad clave
+            "row": 0, # Valor simbólico
+            "col": 0, # Valor simbólico
+            "centroid": {"lon": lon_center, "lat": lat_center}
         }
         feats.append({
             "type":"Feature",
-            "geometry":{"type":"Polygon","coordinates":[c["poly"]]},
+            # Usamos el polígono del BBOX completo
+            "geometry":{"type":"Polygon","coordinates":[full_bbox_poly]},
             "properties": props
         })
-        time.sleep(SLEEP)
-
+    
     gj = {
         "type":"FeatureCollection",
         "features":feats,
         "crs":{"type":"name","properties":{"name":"EPSG:4326"}},
-        "properties":{"source":"open-meteo","time":meta_time}
+        "properties":{"source":"open-meteo","generated_time":meta_time}
     }
     Path("json/amenaza_temp_grid.geojson").write_text(json.dumps(gj, ensure_ascii=False))
-    print(f"OK json/amenaza_temp_grid.geojson cells={len(feats)} time={meta_time}")
+    # <-- MODIFICADO: El número de features ahora es 24 (o las horas que devuelva la API)
+    print(f"OK json/amenaza_temp_grid.geojson features={len(feats)} (1 por hora) time={meta_time}")
 
 if __name__=="__main__":
     main()

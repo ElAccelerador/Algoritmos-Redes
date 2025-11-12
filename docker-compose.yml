@@ -30,10 +30,11 @@ services:
       db:
         condition: service_healthy
     ports: ["8000:8000"]
-    command: uvicorn server:app --host 0.0.0.0 --port 8000
+    command: uvicorn server:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - ./etl:/app/etl # <-- Esta es la línea que soluciona el error
-
+      - ./json:/app/json
+      - ./app:/app
   web:
     image: nginx:alpine
     depends_on: [app]

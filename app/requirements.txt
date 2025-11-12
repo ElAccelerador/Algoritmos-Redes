@@ -1,7 +1,9 @@
 fastapi
 uvicorn[standard]
-psycopg2-binary
+psycopg[binary]
 geojson
 requests
 pyyaml
 shapely
+pyproj
+astral

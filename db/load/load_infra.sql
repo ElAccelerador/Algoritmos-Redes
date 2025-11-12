@@ -1,22 +1,40 @@
--- importa a via_arista_stg con ogr2ogr antes de ejecutar esto
-INSERT INTO via_arista (geom,length_m,osm_id,oneway,highway)
-SELECT s.geom, s.length_m, s.osm_id, s.oneway, s.highway
-FROM (
-  SELECT DISTINCT ON (ST_AsBinary(geom)) geom, length_m, osm_id, oneway, highway
-  FROM via_arista_stg
-) s
-LEFT JOIN via_arista v ON ST_Equals(v.geom, s.geom)
-WHERE v.id IS NULL;
+-- 1. Mover desde STG a tabla final, asignando ID y calculando costos
+-- (Esta es la versión para peatones, bidireccional)
+INSERT INTO via_arista (
+    id, geom, length_m, osm_id, highway,
+    cost, reverse_cost
+)
+SELECT
+    COALESCE(s.osm_id, s.id + 1000000000) AS id,
+    s.geom,
+    COALESCE(s.length_m, ST_Length(s.geom::geography)) AS length_m,
+    s.osm_id,
+    s.highway,
+    COALESCE(s.length_m, ST_Length(s.geom::geography)) AS cost,
+    COALESCE(s.length_m, ST_Length(s.geom::geography)) AS reverse_cost
+FROM via_arista_stg s
+ON CONFLICT (id) DO NOTHING;
 
-TRUNCATE via_arista_stg;
+-- 2. Crear Topología
+-- ¡ESTO CREA LA TABLA 'via_arista_vertices_pgr'!
+SELECT pgr_createTopology('via_arista', 0.000135, 'geom', 'id', 'source', 'target', 'true', clean := false);
 
-CREATE EXTENSION IF NOT EXISTS pgrouting;
-SELECT pgr_createTopology('via_arista', 0.00001, 'geom', 'id', 'source', 'target');
-SELECT pgr_analyzeGraph('via_arista', 0.00001, 'geom', 'id');
+-- 3. Analizar la red (opcional pero recomendado)
+SELECT pgr_analyzeGraph('via_arista', 0.000135, 'geom', 'id', 'source', 'target');
 
+-- 4. Crear la tabla de nodos (para referencia futura)
 DROP TABLE IF EXISTS via_nodo;
 CREATE TABLE via_nodo AS
-  SELECT id::bigint, the_geom::geometry(Point,4326) AS geom,
-         NULL::real AS elev_m, NULL::bigint AS osm_id
-  FROM via_arista_vertices_pgr;
-CREATE INDEX IF NOT EXISTS idx_via_nodo_geom ON via_nodo USING GIST (geom);
+SELECT
+    id,
+    the_geom as geom
+FROM via_arista_vertices_pgr; -- (Ahora esto funciona, porque la tabla existe)
+
+CREATE INDEX idx_via_nodo_geom_nodo ON via_nodo USING GIST (geom);
+
+-- 5. Añadir columna 'geom' a la tabla de vértices
+-- (Esto es lo que main.sh [6.1/6] intentaba hacer)
+ALTER TABLE via_arista_vertices_pgr ADD COLUMN IF NOT EXISTS geom geometry(Point, 4326);
+
+-- 6. Poblar la columna 'geom' (usada por server.py)
+UPDATE via_arista_vertices_pgr v SET geom = n.geom FROM via_nodo n WHERE v.id = n.id;
