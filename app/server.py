@@ -253,8 +253,7 @@ def find_best_route_in_range(
             if not rows:
                 continue # No se encontró ruta para esta hora
 
-            current_cost = sum(row[0] for row in rows)
-            
+            current_cost = sum((row[0] if row[0] is not None else 0) for row in rows)            
             # 3. Comparar y guardar la mejor
             if current_cost < best_route["cost"]:
                 best_route["cost"] = current_cost
