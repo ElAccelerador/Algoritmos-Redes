@@ -19,6 +19,20 @@
     .route-legend{font-size:12px;padding-left:1.5rem}
     .route-legend span{display:inline-block;width:20px;height:4px;border-radius:2px;margin-right:4px;vertical-align:middle}
     #route-info{font-size:12px;color:#333;margin-top:8px;max-height:100px;overflow-y:auto}
+    /* Botón para ver mapa en la hora óptima (A2) */
+    .btn-optimal-hour{
+      display:inline-block;
+      margin-left:8px;
+      background:#007acc;
+      color:#fff;
+      border:0;
+      padding:4px 8px;
+      border-radius:4px;
+      cursor:pointer;
+      font-size:12px;
+    }
+    .btn-optimal-hour:hover{ background:#005a9e; }
+    .result-row{margin-bottom:6px;}
   </style>
 </head>
 <body>
@@ -101,10 +115,21 @@
     const routeLayerAstar = L.layerGroup().addTo(map);
     const routeMarkers    = L.layerGroup().addTo(map);
 
+    // Capa para mostrar la "ruta resaltada" (la que se quiere ver en la hora óptima)
+    let currentBestRouteLayer = L.layerGroup().addTo(map);
+
     // Almacenes de Datos Globales
     let g_amenazaTemp = null;
     let g_amenazaUv   = null;
     let g_sombraPolys = null;
+
+    // Guardar respuestas para poder re-usarlas al mostrar mapa por hora (A2)
+    // keys: 'distancia', 'variables', 'astar' -> raw geojson respuesta del servidor
+    window.bestRouteResults = {
+      distancia: null,
+      variables: null,
+      astar: null
+    };
 
     let picks = [];
     const clickInfo = document.getElementById('click-info');
@@ -250,24 +275,78 @@
       routeLayerVars.clearLayers();
       routeLayerAstar.clearLayers();
       routeMarkers.clearLayers();
+      currentBestRouteLayer.clearLayers();
       routeInfoEl.innerHTML = '';
       clickInfo.textContent = 'Haz 2 clics en el mapa (origen y destino).';
       document.getElementById('time-dist').textContent = '';
       document.getElementById('time-vars').textContent = '';
       document.getElementById('time-astar').textContent = '';
       btnRouteCalc.disabled = true;
+      // reset stored results
+      window.bestRouteResults = { distancia: null, variables: null, astar: null };
     }
     
+    // Mapea routeType -> layer color (usamos los mismos colores que ya tienes en el UI)
+    const ROUTE_COLORS = {
+      distancia: '#e63946',
+      variables: '#1d3557',
+      astar: '#008000'
+    };
+
+    /**
+     * showBestRoute(routeKey, hour)
+     *  - routeKey: 'distancia' | 'variables' | 'astar'
+     *  - hour: integer (0-23)
+     *
+     * Actualiza las capas de amenazas a la hora `hour` y dibuja en el mapa
+     * la ruta guardada para `routeKey`. Mantiene el rango en el UI.
+     */
+    function showBestRoute(routeKey, hour) {
+      // 1) Actualizar capas de amenazas a esa hora
+      updateAmenazas(hour);
+
+      // 2) Quitar resaltado anterior
+      currentBestRouteLayer.clearLayers();
+
+      // 3) Obtener la geojson guardada
+      const geo = window.bestRouteResults[routeKey];
+      if (!geo || !geo.features || geo.features.length === 0) {
+        logErr('No hay ruta guardada para mostrar (' + routeKey + ').');
+        return;
+      }
+
+      // 4) Dibujar la ruta (usar mismo color que la capa original)
+      const color = ROUTE_COLORS[routeKey] || '#007acc';
+      const g = L.geoJSON(geo, {
+        style: () => ({ color: color, weight: 6, opacity: 0.95 }),
+        onEachFeature: (f, layer) => {
+          // optional: popup con info mínima
+          if (geo.properties && geo.properties.best_hour !== undefined) {
+            layer.bindPopup(`Mejor hora: ${geo.properties.best_hour}:00`);
+          }
+        }
+      });
+      currentBestRouteLayer.addLayer(g);
+      // 5) Asegurar que la capa esté visible
+      if (!document.getElementById('chk-route-' + routeKey) || document.getElementById('chk-route-' + routeKey).checked) {
+        currentBestRouteLayer.addTo(map);
+      }
+      // 6) Ajustar vista al bounds de la ruta
+      try { map.fitBounds(g.getBounds(), {padding:[20,20]}); } catch(e){/* ignore */ }
+    }
+
     // --- MODIFICADO: Aceptar rango de horas ---
     async function requestRoute(routeType, layer, style, src, dst, horaInicio, horaFin) {
       let url = '';
       let info = '';
       let timeElId = '';
+      let resultKey = null;
       
       if (routeType === 'distancia') {
         url = `http://localhost:8000/route-fase2-dijkstra-distancia?src=${src}&dst=${dst}`;
         info = 'Ruta Distancia: ';
         timeElId = 'time-dist';
+        resultKey = 'distancia';
       } else {
         // Ambas rutas de amenazas usan los mismos parámetros de rango
         const params = `?src=${src}&dst=${dst}&hora_inicio=${horaInicio}&hora_fin=${horaFin}`;
@@ -275,10 +354,12 @@
           url = `http://localhost:8000/route-fase3-dijkstra-vars${params}`;
           info = `Ruta Dijkstra (${horaInicio}-${horaFin}h): `;
           timeElId = 'time-vars';
+          resultKey = 'variables';
         } else if (routeType === 'astar') {
           url = `http://localhost:8000/route-fase3-astar-vars${params}`;
           info = `Ruta A* (${horaInicio}-${horaFin}h): `;
           timeElId = 'time-astar';
+          resultKey = 'astar';
         } else {
           return;
         }
@@ -288,8 +369,13 @@
         const geo = await safeFetch(url);
         const features = geo?.features || [];
         
+        // Guardar la respuesta completa para poder re-usarla si el usuario pulsa "Ver mapa a la hora óptima"
+        if (resultKey) {
+          window.bestRouteResults[resultKey] = geo;
+        }
+        
         if (features.length === 0) {
-          routeInfoEl.innerHTML += `<div>${info} <span class="err">Sin ruta posible.</span></div>`;
+          routeInfoEl.innerHTML += `<div class="result-row">${info} <span class="err">Sin ruta posible.</span></div>`;
           return;
         }
 
@@ -297,21 +383,38 @@
         layer.addLayer(route);
         try { map.fitBounds(route.getBounds(), {padding:[20,20]}); } catch(_){}
         
-        const timeMs = geo.properties?.compute_time_ms;
+        const timeMs = geo.properties?.compute_time_ms ?? 0;
         const timeStr = `(${timeMs.toFixed(0)} ms)`;
         
         document.getElementById(timeElId).textContent = timeStr;
         
-        // --- MODIFICADO: Mostrar la mejor hora encontrada ---
+        // --- Mostrar la mejor hora encontrada y el botón A2 ---
         let bestHourInfo = '';
+        let btnHtml = '';
         if (geo.properties?.best_hour > -1) {
           bestHourInfo = `(Mejor hora: ${geo.properties.best_hour}:00)`;
+          // crear botón dinámico (no inline onclick con JSON)
+          const btn = document.createElement('button');
+          btn.className = 'btn-optimal-hour';
+          btn.textContent = `Ver mapa a la hora óptima (${geo.properties.best_hour}:00)`;
+          // listener -> showBestRoute usando la clave resultKey
+          btn.addEventListener('click', () => {
+            showBestRoute(resultKey, geo.properties.best_hour);
+          });
+
+          // añadir fila con info + botón
+          const container = document.createElement('div');
+          container.className = 'result-row';
+          container.innerHTML = `${info} <span class="ok">OK</span> ${timeStr} ${bestHourInfo}`;
+          container.appendChild(btn);
+          routeInfoEl.appendChild(container);
+        } else {
+          routeInfoEl.innerHTML += `<div class="result-row">${info} <span class="ok">OK</span> ${timeStr}</div>`;
         }
-        routeInfoEl.innerHTML += `<div>${info} <span class="ok">OK</span> ${timeStr} ${bestHourInfo}</div>`;
         
       } catch(e) {
         document.getElementById(timeElId).textContent = '(Error)';
-        routeInfoEl.innerHTML += `<div>${info} <span class="err">Error: ${e.message}</span></div>`;
+        routeInfoEl.innerHTML += `<div class="result-row">${info} <span class="err">Error: ${e.message}</span></div>`;
         console.error(e);
       }
     }
@@ -323,6 +426,7 @@
       routeLayerDist.clearLayers();
       routeLayerVars.clearLayers();
       routeLayerAstar.clearLayers();
+      currentBestRouteLayer.clearLayers();
       routeInfoEl.innerHTML = 'Calculando...';
       document.getElementById('time-dist').textContent = '';
       document.getElementById('time-vars').textContent = '';
@@ -348,21 +452,21 @@
       if (chkDist) {
         promises.push(requestRoute(
           'distancia', routeLayerDist, 
-          {color:'#e63946', weight:5, opacity: 0.7}, // Rojo
+          {color:ROUTE_COLORS.distancia, weight:5, opacity: 0.7}, // Rojo
           src, dst, null, null
         ));
       }
       if (chkVars) {
         promises.push(requestRoute(
           'variables', routeLayerVars, 
-          {color:'#1d3557', weight:5, opacity: 0.8}, // Azul oscuro
+          {color:ROUTE_COLORS.variables, weight:5, opacity: 0.8}, // Azul oscuro
           src, dst, hInicio, hFin
         ));
       }
       if (chkAstar) {
         promises.push(requestRoute(
           'astar', routeLayerAstar, 
-          {color:'#008000', weight:4, opacity: 0.9, dashArray: '5, 5'}, // Verde
+          {color:ROUTE_COLORS.astar, weight:4, opacity: 0.9, dashArray: '5, 5'}, // Verde
           src, dst, hInicio, hFin
         ));
       }
